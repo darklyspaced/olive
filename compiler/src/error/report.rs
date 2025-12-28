@@ -63,7 +63,7 @@ impl Display for Report {
                 if pos < start {
                     line_pad += " ";
                     column += 1;
-                } else if start <= pos && pos < end {
+                } else if start <= pos && pos < end || start == end {
                     uptick += "^";
                 }
             }

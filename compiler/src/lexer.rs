@@ -8,7 +8,7 @@ use crate::{
     },
     token::{
         Token, TokenKind,
-        Trivia::{self, Space},
+        Trivia::{self},
     },
 };
 
@@ -16,6 +16,7 @@ pub struct Lexer<'de> {
     source: &'de str,
     source_map: &'de SourceMap,
     chars: Scanner<'de>,
+    errors: Vec<Error<LexError>>,
 }
 
 impl<'de> Lexer<'de> {
@@ -25,7 +26,12 @@ impl<'de> Lexer<'de> {
             source_map,
             source,
             chars: Scanner::new(source),
+            errors: Vec::new(),
         }
+    }
+
+    pub fn errors(&self) -> &[Error<LexError>] {
+        &self.errors
     }
 }
 
@@ -110,7 +116,7 @@ impl<'de> Scanner<'de> {
 }
 
 impl<'de> Iterator for Lexer<'de> {
-    type Item = Result<Token<'de>, Error<LexError>>;
+    type Item = Token<'de>;
 
     fn next(&mut self) -> Option<Self::Item> {
         let (mut c, mut start);
@@ -151,8 +157,12 @@ impl<'de> Iterator for Lexer<'de> {
         }
 
         macro_rules! error {
-            ($kind:path) => {
-                return Some(Err(LexError {
+            ($kind:path) => {{
+                // HACK: error reporting should not happen here but that is okay. iteration
+                // consumes the iterator so it makes checking state challenging need to
+                // rearchitecture probably
+                use crate::error::report::Report;
+                let err: Error<LexError> = LexError {
                     kind: $kind,
                     ctxt: Some(
                         self.source_map
@@ -160,8 +170,12 @@ impl<'de> Iterator for Lexer<'de> {
                             .with(line!(), column!()),
                     ),
                 }
-                .into()))
-            };
+                .into();
+
+                println!("{}", Report::from(err));
+
+                return Some(token!(TokenKind::Error));
+            }};
         }
 
         loop {
@@ -278,7 +292,9 @@ impl<'de> Iterator for Lexer<'de> {
                     }
                 }
             }
-            _ => error!(LexErrorKind::UnexpectedCharacter),
+            _ => {
+                error!(LexErrorKind::UnexpectedCharacter)
+            }
         };
 
         while let Some(x) = self.chars.peek()
@@ -320,7 +336,7 @@ impl<'de> Iterator for Lexer<'de> {
             }
         }
 
-        Some(Ok(token))
+        Some(token)
     }
 }
 

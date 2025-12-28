@@ -53,6 +53,7 @@ pub enum SyntaxKind {
     Let,
 
     ParamList,
+    Param,
     RetTy,
     Block,
     FieldList,

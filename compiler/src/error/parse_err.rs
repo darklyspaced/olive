@@ -33,6 +33,8 @@ pub enum ParseErrorKind {
     ExpCommaFound(String),
     ExpVarDefFound(String),
     ExpTyAnnotationFound(String),
+    ExpParamFound(String),
+    ExpStructFieldFound(String),
     ExpFound(Vec<TokenKind>, String),
     IdxNotInitialised,
     SolelyAssDecl,
@@ -92,6 +94,10 @@ impl ParseErrorKind {
             ParseErrorKind::ExpTyAnnotationFound(_) => String::from("expected type annotation"),
             ParseErrorKind::IdxNotInitialised => String::from("must be initialised"),
             ParseErrorKind::ExpVarDefFound(_) => String::from("expected a variable definition"),
+            ParseErrorKind::ExpStructFieldFound(_) => {
+                String::from("expected a struct field or `}`")
+            }
+            ParseErrorKind::ExpParamFound(_) => String::from("expected a function parameter"),
             ParseErrorKind::ExpImplStructTargetFound(_) => {
                 String::from("expected a struct for the impl block")
             }
@@ -163,13 +169,19 @@ impl ParseErrorKind {
                 String::from("loop index must be initialised, try adding a `=`")
             }
             ParseErrorKind::ExpImplStructTargetFound(x) => {
-                String::from("found {x} where a struct name was expected")
+                format!("found {x} where a struct name was expected")
             }
             ParseErrorKind::ExpVarDefFound(x) => {
-                String::from("found {x} where a variable definition was expected")
+                format!("found {x} where a variable definition was expected")
+            }
+            ParseErrorKind::ExpStructFieldFound(x) => {
+                format!("found {x} where a struct field or `}}` was expected")
+            }
+            ParseErrorKind::ExpParamFound(x) => {
+                format!("found {x} where param or `)` was expected")
             }
             ParseErrorKind::ExpIfOrBlockFound(x) => {
-                String::from("found {x} where if or a block was expected")
+                format!("found {x} where if or a block was expected")
             }
             ParseErrorKind::Unreachable(_) => unreachable!(),
         }

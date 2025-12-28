@@ -9,7 +9,7 @@ use compiler::{
 
 #[derive(Parser)]
 #[command(version, about, long_about = None)]
-struct Olivia {
+struct Olive {
     #[command(subcommand)]
     command: Commands,
     #[arg(short, long)]
@@ -31,9 +31,9 @@ enum Commands {
 }
 
 fn main() {
-    let olivia = Olivia::parse();
+    let olive = Olive::parse();
 
-    match &olivia.command {
+    match &olive.command {
         Commands::Parse { filename } => {
             let source_map = SourceMap::from(filename);
 
@@ -41,12 +41,14 @@ fn main() {
             let mut interner = Interner::with_capacity(1024);
 
             let mut parser = OParser::new(lexer, &source_map, &mut interner);
-            let (tree, _) = parser.parse();
+            let (tree, errors) = parser.parse();
             println!("{tree}");
 
-            // TODO: define Display for GreenNode<'de>
+            for error in errors {
+                println!("{}", Report::from(error));
+            }
 
-            if !olivia.debug {
+            if !olive.debug {
                 println!(
                     "{}",
                     Formatted::from(
@@ -60,15 +62,9 @@ fn main() {
 
             let lexer = Lexer::new(&source_map);
 
-            for res in lexer.into_iter() {
-                match res {
-                    Ok(tok) => {
-                        println!("{:?}", tok);
-                    }
-                    Err(e) => {
-                        println!("{}", Report::from(e));
-                    }
-                }
+            for tok in lexer {
+                // NOTE: error reporting happens as soon as the error is found
+                println!("{:?}", tok);
             }
             println!("EOF  null");
         }

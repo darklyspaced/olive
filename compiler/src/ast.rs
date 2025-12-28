@@ -22,7 +22,7 @@ pub struct Annotated;
 #[derive(Debug)]
 pub struct Typed;
 
-/// Initial state of the
+/// Initial state of the AST
 impl Pass for Untyped {
     type XArg = (Ident, Ident);
     type XRet = Option<Ident>;

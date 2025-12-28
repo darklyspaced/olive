@@ -3,7 +3,7 @@ use std::{fmt::Display, rc::Rc};
 use crate::green_node::{Green, GreenTree};
 
 #[derive(Clone, Debug)]
-/// Essentially a zipper datastructure over a purely function tree (the green tree). This is a
+/// Essentially a zipper data structure over a purely functional tree (the green tree). This is a
 /// losless syntax tree.
 pub struct SyntaxTree<'de>(Rc<RedData<'de>>);
 

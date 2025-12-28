@@ -1,5 +1,7 @@
 #![allow(clippy::let_unit_value)]
 #![feature(assert_matches)]
+#![feature(try_trait_v2)]
+#![feature(never_type)]
 
 pub mod ast;
 pub mod disjoint_set;

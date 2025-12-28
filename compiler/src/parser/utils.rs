@@ -1,12 +1,13 @@
+use std::ops::{ControlFlow, FromResidual, Try};
+
 use super::{Parser, State, action::Tree};
 
 use crate::{
-    ast::{Ast, AstId, Ident, InnerAst, Itself, Untyped},
     error::{
         self,
-        lex_err::LexErrorKind,
         parse_err::{ParseError, ParseErrorKind as PEKind},
     },
+    syntax::SyntaxKind,
     token::{Token, TokenKind},
 };
 
@@ -20,20 +21,19 @@ macro_rules! error {
                 .ctxt_from_tok($tok)
                 .with(line!(), column!()),
         );
-        $self.state = State::Recover;
-        return Err(ParseError {
+        ParseError {
             kind: $kind,
             ctxt: context,
         }
-        .into());
+        .into();
     }};
     // if it's something to do with an EOF
     ($self:ident, $kind:expr) => {
-        return Err(ParseError {
+        ParseError {
             kind: $kind,
             ctxt: Some($self.source_map.ctxt_from_end().with(line!(), column!())),
         }
-        .into())
+        .into()
     };
 }
 
@@ -41,38 +41,25 @@ impl Parser<'_> {
     /// Peeks the next token and handles error cases. `err_kind` is for the EOF case
     // TODO: make this a try_peek macro so that line and column information can be captured
     // correctly
-    pub(super) fn peek(
-        &mut self,
-        eof_err: impl FnOnce(String) -> PEKind,
-    ) -> Result<&Token<'_>, Error> {
-        if let Some(Err(e)) = self.toks.peek() {
-            let kind = e.kind();
-            self.state = match kind {
-                LexErrorKind::UnexpectedCharacter => State::Recover,
-                LexErrorKind::UnterminatedStringLiteral => State::Abort,
-            };
-
-            let err = self.toks.next().unwrap().unwrap_err();
-            return Err(err.into());
-        }
-
+    pub(super) fn peek(&mut self, eof_err: impl FnOnce(String) -> PEKind) -> Option<&Token<'_>> {
         match self.toks.peek() {
-            Some(Ok(tok)) => Ok(tok),
-            Some(Err(_)) => unreachable!(),
-            None => error!(self, eof_err(String::from("EOF"))),
+            Some(tok) => Some(tok),
+            None => {
+                self.errors.push(error!(self, eof_err(String::from("EOF"))));
+                None
+            }
         }
     }
 
-    /// Should only be used the case that the next token **exists** but isn't what it should be.
+    pub(super) fn at_eof(&mut self) -> bool {
+        self.toks.peek().is_none()
+    }
+
+    /// Should only be used the case that the next token **exists** but isn't what it should be and
+    /// cooks up error.
     // TODO: make a wrapper for this so that the line and column are captured correctly
     pub fn make_err(&mut self, make_kind: impl FnOnce(String) -> PEKind) -> Error {
-        self.state = State::Recover;
-
-        let erroneous_tok = self
-            .toks
-            .next()
-            .expect("shouldn't be EOF")
-            .expect("should have been a valid token, not error");
+        let erroneous_tok = self.toks.next().expect("shouldn't be EOF");
         let kind = make_kind(String::from(erroneous_tok.lexeme));
         let context = Some(
             self.source_map
@@ -87,11 +74,15 @@ impl Parser<'_> {
     }
 
     /// Attempts to parse an ident and interns its symbol, returning any `err` if it fails
-    pub(super) fn ident(&mut self, err: impl FnOnce(String) -> PEKind) -> Result<(), Error> {
-        let next = self.peek(PEKind::ExpIdentFound)?;
+    pub(super) fn ident(&mut self, err: impl FnOnce(String) -> PEKind) -> Option<Result<(), ()>> {
+        let next = self.peek(PEKind::ExpIdentFound)?; // None -> found eof
         let ident = match next.kind {
-            TokenKind::Ident => self.toks.next().unwrap().unwrap(),
-            _ => return Err(self.make_err(err)),
+            TokenKind::Ident => self.toks.next().unwrap(),
+            _ => {
+                let err = self.make_err(err);
+                self.errors.push(err);
+                return Some(Err(())); // found token that wasn't ident
+            }
         };
 
         self.actions.push(Tree::Ident {
@@ -101,27 +92,61 @@ impl Parser<'_> {
             },
         });
 
-        Ok(())
+        Some(Ok(())) // parsed ident!
     }
 
     /// Eats `kind` otherwise throws `err`
-    pub(super) fn eat<G>(&mut self, kind: TokenKind, err: G) -> Result<(), Error>
+    pub(super) fn eat<G>(&mut self, kind: TokenKind, err: G) -> Option<Result<(), ()>>
     where
         G: FnOnce(String) -> PEKind + Clone,
     {
         let equals = self.peek(err.clone())?;
         if equals.kind == kind {
-            self.consume()
+            self.consume();
         } else {
-            return Err(self.make_err(err));
-        };
-        Ok(())
+            let err = self.make_err(err);
+            self.errors.push(err);
+            return Some(Err(()));
+        }
+        Some(Ok(()))
+    }
+
+    pub(super) fn at_any(&mut self, set: &[TokenKind]) -> bool {
+        match self.toks.peek() {
+            Some(tok) => set.contains(&tok.kind),
+            None => false,
+        }
     }
 
     /// Eats the next token no matter what it is granted that it isn't a lex_error or EOF. Need
-    /// those two guarantees (via peek for example) to call this
+    /// those two invariants (via peek for example) to call this
     pub(super) fn consume(&mut self) {
-        let tok = self.toks.next().unwrap().unwrap();
+        let tok = self.toks.next().unwrap();
         self.actions.push(Tree::Token { tok })
+    }
+
+    pub(super) fn consume_err(&mut self, make_kind: impl FnOnce(String) -> PEKind) {
+        let err = self.make_err(make_kind); // make error before consuming token to get token info
+        self.errors.push(err);
+        let error_tree = self.start();
+        self.consume();
+        error_tree.end(SyntaxKind::Error, self);
+    }
+
+    /// Conforms the parser to to a state that is satisfactory based on the input set of tokens
+    pub(super) fn conform(&mut self, res: Result<(), ()>, set: &[TokenKind]) -> Option<()> {
+        if let Err(_) = res {
+            let error_tree = self.start();
+
+            while !self.at_any(set) && !self.at_eof() {
+                self.consume();
+            }
+
+            error_tree.end(SyntaxKind::Error, self);
+
+            return Some(());
+        } else {
+            Some(())
+        }
     }
 }
